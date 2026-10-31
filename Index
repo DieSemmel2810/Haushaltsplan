@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6f2">
+  <title>Haushaltsplan</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 20px 16px 40px; background: #f5f6f2;
+      color: #20251f; font: 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 620px; margin: auto; }
+    h1 { font-size: 30px; margin: 12px 0 20px; }
+    h2 { font-size: 18px; margin: 0 0 14px; }
+    .card {
+      background: white; border: 1px solid #e7e9e4; border-radius: 18px;
+      padding: 18px; margin: 14px 0; box-shadow: 0 2px 8px #00000008;
+    }
+    .month { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .month button { width: 42px; height: 42px; font-size: 20px; }
+    #monthLabel { font-weight: 700; text-transform: capitalize; }
+    .totals { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .total { background: #f6f7f4; padding: 12px; border-radius: 12px; }
+    .total small { display: block; color: #666; margin-bottom: 5px; }
+    .total strong { font-size: 18px; }
+    .balance { margin-top: 12px; font-size: 18px; }
+    label { display: block; font-size: 14px; color: #50564e; margin: 12px 0 5px; }
+    input, select, button {
+      font: inherit; border: 1px solid #d8dbd5; border-radius: 11px;
+      padding: 12px; background: white; color: inherit;
+    }
+    input, select { width: 100%; }
+    button { cursor: pointer; }
+    .primary { width: 100%; border: 0; background: #246b4b; color: white; font-weight: 700; margin-top: 14px; }
+    .entry { display: flex; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid #eee; }
+    .entry:last-child { border-bottom: 0; }
+    .entry small { display: block; color: #777; margin-top: 3px; }
+    .income { color: #187144; font-weight: 700; }
+    .expense { color: #30352f; font-weight: 700; }
+    .delete { border: 0; background: transparent; color: #a33; padding: 4px 8px; }
+    .goal-line { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; margin: 14px 0 6px; }
+    progress { width: 100%; height: 12px; accent-color: #246b4b; }
+    .hint { color: #71766f; font-size: 13px; line-height: 1.4; }
+    @media (min-width: 500px) { body { padding-top: 36px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Haushaltsplan</h1>
+
+  <section class="card">
+    <div class="month">
+      <button aria-label="Vorheriger Monat" id="prev">‹</button>
+      <span id="monthLabel"></span>
+      <button aria-label="Nächster Monat" id="next">›</button>
+    </div>
+    <div class="totals">
+      <div class="total"><small>Einnahmen</small><strong id="income">0 €</strong></div>
+      <div class="total"><small>Ausgaben</small><strong id="expenses">0 €</strong></div>
+    </div>
+    <div class="balance">Übrig: <strong id="balance">0 €</strong></div>
+  </section>
+
+  <section class="card">
+    <h2>Eintrag hinzufügen</h2>
+    <form id="entryForm">
+      <label for="description">Beschreibung</label>
+      <input id="description" placeholder="z. B. Gehalt oder Miete" required>
+      <label for="amount">Betrag in Euro</label>
+      <input id="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" required>
+      <label for="type">Art</label>
+      <select id="type">
+        <option value="expense">Ausgabe</option>
+        <option value="income">Einnahme</option>
+      </select>
+      <button class="primary" type="submit">Eintrag speichern</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Einträge dieses Monats</h2>
+    <div id="entries"></div>
+  </section>
+
+  <section class="card">
+    <h2>Sparziele</h2>
+    <label for="monthlyGoal">Monatsziel (€)</label>
+    <input id="monthlyGoal" type="number" min="0" step="0.01" inputmode="decimal" placeholder="z. B. 200">
+    <div class="goal-line"><span>Monatsfortschritt</span><span id="monthText">0 € von 0 €</span></div>
+    <progress id="monthProgress" value="0" max="100"></progress>
+
+    <label for="yearlyGoal">Jahresziel (€)</label>
+    <input id="yearlyGoal" type="number" min="0" step="0.01" inputmode="decimal" placeholder="z. B. 2400">
+    <div class="goal-line"><span>Jahresfortschritt</span><span id="yearText">0 € von 0 €</span></div>
+    <progress id="yearProgress" value="0" max="100"></progress>
+    <p class="hint">Der Sparfortschritt berechnet sich aus Einnahmen minus Ausgaben.</p>
+  </section>
+</main>
+
+<script>
+  const KEY = "haushaltsplan-v1";
+  const fmt = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" });
+  const monthInputDate = new Date();
+  let shownMonth = new Date(monthInputDate.getFullYear(), monthInputDate.getMonth(), 1);
+  let data = JSON.parse(localStorage.getItem(KEY) || '{"entries":[],"monthlyGoal":0,"yearlyGoal":0}');
+
+  const $ = id => document.getElementById(id);
+  const monthKey = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  const money = value => fmt.format(value);
+  const parse = value => Number(String(value).replace(",", ".")) || 0;
+
+  function save() {
+    data.monthlyGoal = parse($("monthlyGoal").value);
+    data.yearlyGoal = parse($("yearlyGoal").value);
+    localStorage.setItem(KEY, JSON.stringify(data));
+    render();
+  }
+
+  function render() {
+    const key = monthKey(shownMonth);
+    const thisMonth = data.entries.filter(e => e.month === key);
+    const inc = thisMonth.filter(e => e.type === "income").reduce((s, e) => s + e.amount, 0);
+    const out = thisMonth.filter(e => e.type === "expense").reduce((s, e) => s + e.amount, 0);
+    const balance = inc - out;
+    const year = String(shownMonth.getFullYear());
+    const yearBalance = data.entries
+      .filter(e => e.month.startsWith(year))
+      .reduce((s, e) => s + (e.type === "income" ? e.amount : -e.amount), 0);
+
+    $("monthLabel").textContent = shownMonth.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+    $("income").textContent = money(inc);
+    $("expenses").textContent = money(out);
+    $("balance").textContent = money(balance);
+
+    $("monthlyGoal").value = data.monthlyGoal || "";
+    $("yearlyGoal").value = data.yearlyGoal || "";
+    $("monthText").textContent = `${money(balance)} von ${money(data.monthlyGoal)}`;
+    $("yearText").textContent = `${money(yearBalance)} von ${money(data.yearlyGoal)}`;
+    $("monthProgress").value = data.monthlyGoal ? Math.max(0, Math.min(100, balance / data.monthlyGoal * 100)) : 0;
+    $("yearProgress").value = data.yearlyGoal ? Math.max(0, Math.min(100, yearBalance / data.yearlyGoal * 100)) : 0;
+
+    const list = $("entries");
+    list.replaceChildren();
+    if (!thisMonth.length) {
+      list.innerHTML = '<p class="hint">Noch keine Einträge für diesen Monat.</p>';
+    } else {
+      thisMonth.forEach(entry => {
+        const row = document.createElement("div");
+        row.className = "entry";
+        const info = document.createElement("div");
+        info.innerHTML = `<strong></strong><small>${entry.type === "income" ? "Einnahme" : "Ausgabe"}</small>`;
+        info.querySelector("strong").textContent = entry.description;
+        const right = document.createElement("div");
+        const value = document.createElement("span");
+        value.className = entry.type === "income" ? "income" : "expense";
+        value.textContent = `${entry.type === "income" ? "+" : "−"}${money(entry.amount)}`;
+        const del = document.createElement("button");
+        del.className = "delete";
+        del.textContent = "Löschen";
+        del.onclick = () => { data.entries = data.entries.filter(e => e.id !== entry.id); save(); };
+        right.append(value, document.createElement("br"), del);
+        row.append(info, right);
+        list.append(row);
+      });
+    }
+  }
+
+  $("entryForm").addEventListener("submit", event => {
+    event.preventDefault();
+    data.entries.push({
+      id: crypto.randomUUID(),
+      description: $("description").value.trim(),
+      amount: parse($("amount").value),
+      type: $("type").value,
+      month: monthKey(shownMonth)
+    });
+    $("description").value = "";
+    $("amount").value = "";
+    save();
+  });
+
+  $("prev").onclick = () => {
+    shownMonth.setMonth(shownMonth.getMonth() - 1);
+    render();
+  };
+  $("next").onclick = () => {
+    shownMonth.setMonth(shownMonth.getMonth() + 1);
+    render();
+  };
+  $("monthlyGoal").addEventListener("change", save);
+  $("yearlyGoal").addEventListener("change", save);
+
+  render();
+</script>
+</body>
+</html>
